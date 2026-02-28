@@ -1,0 +1,192 @@
+services:
+  frontend:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.frontend
+    restart: unless-stopped
+    env_file:
+      - ../../.env.example
+    environment:
+      API_PROXY_TARGET: "http://api:8080"
+      NEXT_PUBLIC_API_BASE_URL: ""
+    ports:
+      - "3001:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.app
+      args:
+        SERVICE: api
+    restart: unless-stopped
+    env_file:
+      - ../../.env.example
+    environment:
+      FRONTEND_URL: "http://frontend:3000"
+    ports:
+      - "8080:8080"
+    depends_on:
+      frontend:
+        condition: service_started
+      auth-service:
+        condition: service_started
+      stream-service:
+        condition: service_started
+      chat-service:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+
+  auth-service:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.app
+      args:
+        SERVICE: auth-service
+    restart: unless-stopped
+    env_file:
+      - ../../.env.example
+    environment:
+      HTTP_PORT: "8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  stream-service:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.app
+      args:
+        SERVICE: stream-service
+    restart: unless-stopped
+    env_file:
+      - ../../.env.example
+    environment:
+      HTTP_PORT: "8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+
+  chat-service:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.app
+      args:
+        SERVICE: chat-service
+    restart: unless-stopped
+    env_file:
+      - ../../.env.example
+    environment:
+      HTTP_PORT: "8083"
+    depends_on:
+      redis:
+        condition: service_started
+      nats:
+        condition: service_started
+      minio:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: live
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  nats:
+    image: nats:2.11
+    command: ["-js"]
+    ports:
+      - "4222:4222"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    ports:
+      - "1935:1935"
+      - "8888:8888"
+      - "8889:8889"
+      - "8189:8189/udp"
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    volumes:
+      - ../../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../../observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml
+    ports:
+      - "9090:9090"
+
+  loki:
+    image: grafana/loki:3.1.1
+    command: ["-config.file=/etc/loki/config.yml"]
+    volumes:
+      - ../../observability/loki/config.yml:/etc/loki/config.yml
+    ports:
+      - "3100:3100"
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo/config.yml"]
+    volumes:
+      - ../../observability/tempo/config.yml:/etc/tempo/config.yml
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.109.0
+    command: ["--config=/etc/otel-collector/config.yaml"]
+    volumes:
+      - ../../observability/otel-collector/config.yaml:/etc/otel-collector/config.yaml
+    ports:
+      - "4318:4318"
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    volumes:
+      - ../../observability/grafana/provisioning:/etc/grafana/provisioning
+      - ../../observability/grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
