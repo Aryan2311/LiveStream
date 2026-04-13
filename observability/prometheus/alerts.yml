@@ -1,0 +1,17 @@
+groups:
+  - name: platform
+    rules:
+      - alert: HighAPIErrorRate
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: API error rate is elevated
+      - alert: PodRestartsDetected
+        expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: Pods are restarting repeatedly
