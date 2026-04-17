@@ -1,0 +1,12 @@
+resources:
+  - config.yaml
+  - dependencies.yaml
+  - frontend/deployment.yaml
+  - api/deployment.yaml
+  - auth-service/deployment.yaml
+  - stream-service/deployment.yaml
+  - chat-service/deployment.yaml
+  - mediamtx/deployment.yaml
+  - otel-collector/deployment.yaml
+  - ingress.yaml
+  - operations.yaml

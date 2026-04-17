@@ -1,0 +1,145 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mediamtx-config
+data:
+  mediamtx.yml: |
+    logLevel: info
+
+    api: yes
+    apiAddress: :9997
+
+    # Default MediaMTX only allows the control API from 127.0.0.1; in-cluster callers need this.
+    authInternalUsers:
+      - user: any
+        pass:
+        ips: []
+        permissions:
+          - action: publish
+            path:
+          - action: read
+            path:
+          - action: playback
+            path:
+          - action: api
+            path:
+          - action: metrics
+            path:
+
+    rtmp: yes
+    rtmpAddress: :1935
+
+    hls: yes
+    hlsAddress: :8888
+    hlsAlwaysRemux: yes
+    hlsVariant: lowLatency
+    hlsDirectory: /tmp/mediamtx-hls
+
+    webrtc: yes
+    webrtcAddress: :8889
+    webrtcLocalUDPAddress: :8189
+    webrtcAdditionalHosts:
+      - "a0f56f09afda441bb82d2ea89c24c364-4cb6a20936a6c935.elb.us-east-1.amazonaws.com"
+    webrtcICEServers2: []
+
+    paths:
+      "~^live/.+$":
+        source: publisher
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mediamtx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mediamtx
+  template:
+    metadata:
+      labels:
+        app: mediamtx
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: mediamtx
+      containers:
+        - name: mediamtx
+          image: bluenviron/mediamtx:latest
+          ports:
+            - name: api
+              containerPort: 9997
+              protocol: TCP
+            - name: rtmp
+              containerPort: 1935
+              protocol: TCP
+            - name: hls
+              containerPort: 8888
+              protocol: TCP
+            - name: whip
+              containerPort: 8889
+              protocol: TCP
+            - name: webrtc-udp
+              containerPort: 8189
+              protocol: UDP
+          volumeMounts:
+            - name: config
+              mountPath: /mediamtx.yml
+              subPath: mediamtx.yml
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: 8888
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8888
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: config
+          configMap:
+            name: mediamtx-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mediamtx
+spec:
+  selector:
+    app: mediamtx
+  ports:
+    - name: api
+      port: 9997
+      targetPort: 9997
+      protocol: TCP
+    - name: rtmp
+      port: 1935
+      targetPort: 1935
+      protocol: TCP
+    - name: hls
+      port: 8888
+      targetPort: 8888
+      protocol: TCP
+    - name: whip
+      port: 8889
+      targetPort: 8889
+      protocol: TCP
+    - name: webrtc-udp
+      port: 8189
+      targetPort: 8189
+      protocol: UDP
