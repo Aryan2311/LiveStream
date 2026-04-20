@@ -1,0 +1,24 @@
+resources:
+  - ../../base
+
+namespace: live-dev
+
+patches:
+  - path: config-patch.yaml
+
+images:
+  - name: live-streaming-platform/frontend
+    newName: 901607649958.dkr.ecr.us-east-1.amazonaws.com/live-dev/frontend
+    newTag: latest
+  - name: live-streaming-platform/api
+    newName: 901607649958.dkr.ecr.us-east-1.amazonaws.com/live-dev/api
+    newTag: latest
+  - name: live-streaming-platform/auth-service
+    newName: 901607649958.dkr.ecr.us-east-1.amazonaws.com/live-dev/auth-service
+    newTag: latest
+  - name: live-streaming-platform/stream-service
+    newName: 901607649958.dkr.ecr.us-east-1.amazonaws.com/live-dev/stream-service
+    newTag: latest
+  - name: live-streaming-platform/chat-service
+    newName: 901607649958.dkr.ecr.us-east-1.amazonaws.com/live-dev/chat-service
+    newTag: latest

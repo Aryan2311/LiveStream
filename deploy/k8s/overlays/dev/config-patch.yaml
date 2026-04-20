@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-config
+data:
+  APP_ENV: development
+  POSTGRES_DSN: postgres://postgres:CHANGEME@live-dev-postgres.cmj4q4om2skf.us-east-1.rds.amazonaws.com:5432/live?sslmode=require
+  REDIS_ADDR: live-dev-redis-qpu8un.serverless.use1.cache.amazonaws.com:6379
+  S3_ENDPOINT: ""
+  S3_USE_PATH_STYLE: "false"
+  MEDIA_BUCKET_NAME: live-dev-media-artifacts
+  ASSET_PUBLIC_BASE_URL: https://d1jv83oabjefqs.cloudfront.net
+  AWS_REGION: us-east-1
+  MEDIAMTX_API_URL: http://mediamtx:9997
