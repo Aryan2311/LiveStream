@@ -1,0 +1,133 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+  push:
+    branches: ["main"]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER: live-dev
+  K8S_NAMESPACE: live-dev
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+      account_id: ${{ steps.login.outputs.account }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: meta
+        run: echo "tag=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.app
+          build-args: SERVICE=api
+          push: true
+          tags: ${{ steps.login.outputs.registry }}/live-dev/api:${{ steps.meta.outputs.tag }}
+
+      - name: Build and push auth-service
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.app
+          build-args: SERVICE=auth-service
+          push: true
+          tags: ${{ steps.login.outputs.registry }}/live-dev/auth-service:${{ steps.meta.outputs.tag }}
+
+      - name: Build and push stream-service
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.app
+          build-args: SERVICE=stream-service
+          push: true
+          tags: ${{ steps.login.outputs.registry }}/live-dev/stream-service:${{ steps.meta.outputs.tag }}
+
+      - name: Build and push chat-service
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.app
+          build-args: SERVICE=chat-service
+          push: true
+          tags: ${{ steps.login.outputs.registry }}/live-dev/chat-service:${{ steps.meta.outputs.tag }}
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.frontend
+          push: true
+          tags: ${{ steps.login.outputs.registry }}/live-dev/frontend:${{ steps.meta.outputs.tag }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+
+      - name: Update image tags in overlay
+        working-directory: deploy/k8s/overlays/dev
+        run: |
+          REGISTRY="${{ needs.build-and-push.outputs.account_id }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          TAG="${{ needs.build-and-push.outputs.image_tag }}"
+          sed -i "s|ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com|${REGISTRY}|g" kustomization.yaml
+          sed -i "s|newTag: latest|newTag: ${TAG}|g" kustomization.yaml
+
+      - name: Create namespace
+        run: kubectl create namespace ${{ env.K8S_NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy to EKS
+        run: kubectl apply -k deploy/k8s/overlays/dev/
+
+      - name: Wait for rollout
+        run: |
+          for deploy in frontend api auth-service stream-service chat-service mediamtx; do
+            kubectl rollout status deployment/${deploy} -n ${{ env.K8S_NAMESPACE }} --timeout=300s
+          done
+
+      - name: Get ingress URL
+        run: |
+          echo "Waiting for ALB to provision..."
+          sleep 30
+          kubectl get ingress -n ${{ env.K8S_NAMESPACE }}
