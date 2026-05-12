@@ -1,0 +1,95 @@
+AWS_REGION   ?= us-east-1
+EKS_CLUSTER  ?= live-dev
+K8S_NS       ?= live-dev
+ENV_NAME     ?= live-dev
+TAG          ?= $(shell git rev-parse --short HEAD)
+ACCOUNT_ID   ?= $(shell aws sts get-caller-identity --query Account --output text)
+REGISTRY     ?= $(ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
+
+SERVICES     = api auth-service stream-service chat-service
+TF_DIR       = deploy/terraform/aws/environments/dev
+
+.PHONY: help ecr-login build-go build-frontend build-images push-images \
+        deploy-infra kubeconfig deploy-k8s deploy-all tf-init tf-plan tf-apply \
+        bootstrap-state
+
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
+
+# ---------- State bootstrap (run once before first tf init) ----------
+
+bootstrap-state: ## Create S3 bucket and DynamoDB table for Terraform state
+	aws s3api create-bucket \
+		--bucket $(ENV_NAME)-terraform-state \
+		--region $(AWS_REGION)
+	aws s3api put-bucket-versioning \
+		--bucket $(ENV_NAME)-terraform-state \
+		--versioning-configuration Status=Enabled
+	aws dynamodb create-table \
+		--table-name $(ENV_NAME)-terraform-locks \
+		--attribute-definitions AttributeName=LockID,AttributeType=S \
+		--key-schema AttributeName=LockID,KeyType=HASH \
+		--billing-mode PAY_PER_REQUEST \
+		--region $(AWS_REGION)
+
+# ---------- Terraform ----------
+
+tf-init: ## Initialize Terraform
+	cd $(TF_DIR) && terraform init
+
+tf-plan: ## Plan Terraform changes
+	cd $(TF_DIR) && terraform plan
+
+tf-apply: ## Apply Terraform changes
+	cd $(TF_DIR) && terraform apply
+
+deploy-infra: tf-init tf-apply ## Provision AWS infrastructure
+
+# ---------- Docker ----------
+
+ecr-login: ## Login to ECR
+	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(REGISTRY)
+
+build-go: ## Build all Go service images
+	@for svc in $(SERVICES); do \
+		echo "Building $$svc..."; \
+		docker build -t $(REGISTRY)/$(ENV_NAME)/$$svc:$(TAG) \
+			--build-arg SERVICE=$$svc \
+			-f deploy/docker/Dockerfile.app .; \
+	done
+
+build-frontend: ## Build frontend image
+	docker build -t $(REGISTRY)/$(ENV_NAME)/frontend:$(TAG) \
+		-f deploy/docker/Dockerfile.frontend .
+
+build-images: build-go build-frontend ## Build all Docker images
+
+push-images: ecr-login ## Push all images to ECR
+	@for svc in $(SERVICES); do \
+		docker push $(REGISTRY)/$(ENV_NAME)/$$svc:$(TAG); \
+	done
+	docker push $(REGISTRY)/$(ENV_NAME)/frontend:$(TAG)
+
+# ---------- Kubernetes ----------
+
+kubeconfig: ## Update kubeconfig for the EKS cluster
+	aws eks update-kubeconfig --name $(EKS_CLUSTER) --region $(AWS_REGION)
+
+deploy-k8s: ## Deploy to EKS using Kustomize
+	@cd deploy/k8s/overlays/dev && \
+		sed -i.bak "s|ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com|$(REGISTRY)|g" kustomization.yaml && \
+		sed -i.bak "s|newTag: latest|newTag: $(TAG)|g" kustomization.yaml && \
+		rm -f kustomization.yaml.bak
+	kubectl create namespace $(K8S_NS) --dry-run=client -o yaml | kubectl apply -f -
+	kubectl apply -k deploy/k8s/overlays/dev/
+	@echo "Waiting for rollout..."
+	@for deploy in frontend api auth-service stream-service chat-service mediamtx; do \
+		kubectl rollout status deployment/$$deploy -n $(K8S_NS) --timeout=300s; \
+	done
+	@echo ""
+	@echo "=== Ingress ==="
+	@kubectl get ingress -n $(K8S_NS)
+
+# ---------- Full deploy ----------
+
+deploy-all: deploy-infra kubeconfig build-images push-images deploy-k8s ## Full deployment pipeline
