@@ -1,0 +1,75 @@
+global:
+  imagePullPolicy: IfNotPresent
+  config:
+    APP_ENV: production
+    LOG_LEVEL: info
+    FRONTEND_URL: http://frontend:3000
+    AUTH_SERVICE_URL: http://auth-service:8081
+    STREAM_SERVICE_URL: http://stream-service:8082
+    CHAT_SERVICE_URL: http://chat-service:8083
+    API_PROXY_TARGET: http://api:8080
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    PUBLIC_BASE_URL: https://stream.example.com
+    RTMP_BASE_URL: rtmp://mediamtx:1935
+    HLS_BASE_URL: http://mediamtx:8888/live
+    STREAM_APP_NAME: live
+    STREAM_PUBLISH_TTL: 24h
+    REDIS_ADDR: redis:6379
+    NATS_URL: nats://nats:4222
+    POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/live?sslmode=disable
+    AWS_REGION: us-east-1
+    MEDIA_BUCKET_NAME: live-prod-media-artifacts
+    S3_ENDPOINT: ""
+    S3_USE_PATH_STYLE: "false"
+    ASSET_PUBLIC_BASE_URL: ""
+    UPLOAD_URL_EXPIRY: 15m
+    BOOTSTRAP_ADMIN_EMAILS: admin@example.com
+  secrets:
+    JWT_SECRET: change-me
+    INTERNAL_SERVICE_TOKEN: internal-change-me
+    PLAYBACK_SIGNING_KEY: playback-change-me
+    INGEST_SIGNING_KEY: ingest-change-me
+
+frontend:
+  replicaCount: 2
+  image: live-streaming-platform/frontend:latest
+  port: 3000
+  readinessPath: /api/health
+  livenessPath: /api/health
+  extraEnv:
+    - name: PORT
+      value: "3000"
+    - name: HOSTNAME
+      value: "0.0.0.0"
+
+api:
+  replicaCount: 2
+  image: live-streaming-platform/api:latest
+  port: 8080
+  readinessPath: /readyz
+  livenessPath: /livez
+
+authService:
+  replicaCount: 2
+  image: live-streaming-platform/auth-service:latest
+  port: 8081
+  readinessPath: /readyz
+  livenessPath: /livez
+
+streamService:
+  replicaCount: 2
+  image: live-streaming-platform/stream-service:latest
+  port: 8082
+  readinessPath: /readyz
+  livenessPath: /livez
+
+chatService:
+  replicaCount: 2
+  image: live-streaming-platform/chat-service:latest
+  port: 8083
+  readinessPath: /readyz
+  livenessPath: /livez
+
+ingress:
+  enabled: true
+  host: stream.example.com

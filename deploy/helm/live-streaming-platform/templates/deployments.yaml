@@ -1,0 +1,71 @@
+{{- $fullname := include "live-streaming-platform.fullname" . -}}
+{{- range $svc := list
+  (dict "name" "frontend" "values" $.Values.frontend)
+  (dict "name" "api" "values" $.Values.api)
+  (dict "name" "auth-service" "values" $.Values.authService)
+  (dict "name" "stream-service" "values" $.Values.streamService)
+  (dict "name" "chat-service" "values" $.Values.chatService)
+}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-{{ $svc.name }}
+spec:
+  replicas: {{ $svc.values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ $fullname }}-{{ $svc.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $fullname }}-{{ $svc.name }}
+    spec:
+      containers:
+        - name: {{ $svc.name }}
+          image: {{ $svc.values.image }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: {{ $svc.values.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ $fullname }}-config
+            - secretRef:
+                name: {{ $fullname }}-secrets
+          env:
+            - name: HTTP_PORT
+              value: {{ printf "%v" $svc.values.port | quote }}
+            {{- with $svc.values.extraEnv }}
+            {{- range . }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: {{ $svc.values.readinessPath }}
+              port: {{ $svc.values.port }}
+          livenessProbe:
+            httpGet:
+              path: {{ $svc.values.livenessPath }}
+              port: {{ $svc.values.port }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc.name }}
+spec:
+  selector:
+    app: {{ $fullname }}-{{ $svc.name }}
+  ports:
+    - name: http
+      port: {{ $svc.values.port }}
+      targetPort: {{ $svc.values.port }}
+{{- end }}
