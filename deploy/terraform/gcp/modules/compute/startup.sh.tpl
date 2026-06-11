@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+exec > /var/log/live-stream-startup.log 2>&1
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -20,19 +21,19 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 systemctl enable docker
 systemctl start docker
 
-EXTERNAL_IP="${static_ip}"
 APP_DIR="/opt/live-stream"
 REPO_URL="${repo_url}"
 REPO_BRANCH="${repo_branch}"
-IMAGE_REPO="${image_repository}"
-IMAGE_TAG="${image_tag}"
 
 mkdir -p "$APP_DIR"
-if [ ! -d "$APP_DIR/.git" ]; then
+if [ -d "$APP_DIR/.git" ]; then
+  cd "$APP_DIR"
+  git fetch origin
+  git reset --hard "origin/$REPO_BRANCH"
+else
   git clone --branch "$REPO_BRANCH" --depth 1 "$REPO_URL" "$APP_DIR"
+  cd "$APP_DIR"
 fi
-
-cd "$APP_DIR"
 
 cat > .env.gcp <<EOF
 APP_ENV=production
@@ -72,8 +73,8 @@ MEDIA_WEBHOOK_CLOCK_SKEW=5m
 POSTGRES_PASSWORD=${postgres_password}
 MINIO_ROOT_USER=minio
 MINIO_ROOT_PASSWORD=minio123
-IMAGE_REGISTRY=$${IMAGE_REPO}
-IMAGE_TAG=$${IMAGE_TAG}
+IMAGE_REGISTRY=${image_repository}
+IMAGE_TAG=${image_tag}
 EOF
 
 mkdir -p deploy/docker/generated
@@ -120,15 +121,8 @@ paths:
     source: publisher
 EOF
 
-gcloud auth configure-docker ${region}-docker.pkg.dev --quiet
+export IMAGE_REGISTRY="${image_repository}"
+export IMAGE_TAG="${image_tag}"
 
-export IMAGE_REGISTRY="$IMAGE_REPO"
-export IMAGE_TAG="$IMAGE_TAG"
-
-if docker compose -f deploy/docker/docker-compose.gcp.yml --env-file .env.gcp pull; then
-  docker compose -f deploy/docker/docker-compose.gcp.yml --env-file .env.gcp up -d --remove-orphans
-else
-  docker compose -f deploy/docker/docker-compose.gcp.yml --env-file .env.gcp up -d --build --remove-orphans
-fi
-
+docker compose -f deploy/docker/docker-compose.gcp.yml --env-file .env.gcp up -d --build --remove-orphans
 docker compose -f deploy/docker/docker-compose.gcp.yml --env-file .env.gcp ps > /var/log/live-stream-compose.log 2>&1 || true
