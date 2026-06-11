@@ -1,0 +1,188 @@
+x-app-image: &app-image
+  restart: unless-stopped
+
+x-go-service: &go-service
+  <<: *app-image
+  env_file:
+    - ../../.env.gcp
+  networks:
+    - platform
+
+services:
+  edge:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ../gcp/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      frontend:
+        condition: service_started
+      api:
+        condition: service_started
+    networks:
+      - platform
+
+  frontend:
+    <<: *app-image
+    image: ${IMAGE_REGISTRY}/frontend:${IMAGE_TAG:-latest}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.frontend
+    env_file:
+      - ../../.env.gcp
+    environment:
+      API_PROXY_TARGET: "http://api:8080"
+      NEXT_PUBLIC_API_BASE_URL: ""
+    networks:
+      - platform
+
+  api:
+    <<: *go-service
+    image: ${IMAGE_REGISTRY}/api:${IMAGE_TAG:-latest}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.app
+      args:
+        SERVICE: api
+    environment:
+      FRONTEND_URL: "http://frontend:3000"
+    depends_on:
+      frontend:
+        condition: service_started
+      auth-service:
+        condition: service_started
+      stream-service:
+        condition: service_started
+      chat-service:
+        condition: service_started
+
+  auth-service:
+    <<: *go-service
+    image: ${IMAGE_REGISTRY}/auth-service:${IMAGE_TAG:-latest}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.app
+      args:
+        SERVICE: auth-service
+    environment:
+      HTTP_PORT: "8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  stream-service:
+    <<: *go-service
+    image: ${IMAGE_REGISTRY}/stream-service:${IMAGE_TAG:-latest}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.app
+      args:
+        SERVICE: stream-service
+    environment:
+      HTTP_PORT: "8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+
+  chat-service:
+    <<: *go-service
+    image: ${IMAGE_REGISTRY}/chat-service:${IMAGE_TAG:-latest}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.app
+      args:
+        SERVICE: chat-service
+    environment:
+      HTTP_PORT: "8083"
+    depends_on:
+      redis:
+        condition: service_started
+      nats:
+        condition: service_started
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: live
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - platform
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    networks:
+      - platform
+
+  nats:
+    image: nats:2.11
+    restart: unless-stopped
+    command: ["-js"]
+    networks:
+      - platform
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
+    volumes:
+      - minio-data:/data
+    networks:
+      - platform
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    env_file:
+      - ../../.env.gcp
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minio} $${MINIO_ROOT_PASSWORD:-minio123}; do sleep 2; done;
+      mc mb local/$${MEDIA_BUCKET_NAME:-live-demo-media-artifacts} --ignore-existing;
+      mc anonymous set download local/$${MEDIA_BUCKET_NAME:-live-demo-media-artifacts};
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
+      MEDIA_BUCKET_NAME: ${MEDIA_BUCKET_NAME:-live-demo-media-artifacts}
+    networks:
+      - platform
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    restart: unless-stopped
+    ports:
+      - "1935:1935"
+      - "8189:8189/udp"
+    volumes:
+      - ./generated/mediamtx.gcp.yml:/mediamtx.yml:ro
+    networks:
+      - platform
+
+networks:
+  platform:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  minio-data:

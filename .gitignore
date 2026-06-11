@@ -9,10 +9,14 @@ dist/
 *.tfstate.*
 *.tfplan
 tfplan
+*.tfvars
+!*.tfvars.example
 coverage.out
 tmp/
 vendor/
 *.log
+.env
+.env.gcp
 node_modules/
 frontend/.next/
 web/dist/

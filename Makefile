@@ -93,3 +93,56 @@ deploy-k8s: ## Deploy to EKS using Kustomize
 # ---------- Full deploy ----------
 
 deploy-all: deploy-infra kubeconfig build-images push-images deploy-k8s ## Full deployment pipeline
+
+# ---------- GCP demo (low-cost) ----------
+
+GCP_PROJECT  ?= $(shell gcloud config get-value project 2>/dev/null)
+GCP_REGION   ?= us-central1
+GCP_ZONE     ?= us-central1-a
+GCP_NAME     ?= live-demo
+GCP_TF_DIR   = deploy/terraform/gcp/environments/demo
+GCP_REGISTRY ?= $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/$(GCP_NAME)-images
+GCP_SERVICES = api auth-service stream-service chat-service frontend
+
+gcp-tf-init: ## Initialize GCP demo Terraform
+	cd $(GCP_TF_DIR) && terraform init
+
+gcp-tf-plan: ## Plan GCP demo infrastructure
+	cd $(GCP_TF_DIR) && terraform plan
+
+gcp-tf-apply: ## Apply GCP demo infrastructure
+	cd $(GCP_TF_DIR) && terraform apply
+
+gcp-deploy-infra: gcp-tf-init gcp-tf-apply ## Provision GCP demo VM + Artifact Registry
+
+gcp-auth-docker: ## Configure Docker for Artifact Registry
+	gcloud auth configure-docker $(GCP_REGION)-docker.pkg.dev --quiet
+
+gcp-build-go: ## Build Go service images for GCP
+	@for svc in api auth-service stream-service chat-service; do \
+		echo "Building $$svc..."; \
+		docker build -t $(GCP_REGISTRY)/$$svc:$(TAG) \
+			--build-arg SERVICE=$$svc \
+			-f deploy/docker/Dockerfile.app .; \
+	done
+
+gcp-build-frontend: ## Build frontend image for GCP
+	docker build -t $(GCP_REGISTRY)/frontend:$(TAG) \
+		-f deploy/docker/Dockerfile.frontend .
+
+gcp-build-images: gcp-build-go gcp-build-frontend ## Build all GCP demo images
+
+gcp-push-images: gcp-auth-docker ## Push images to Artifact Registry
+	@for svc in $(GCP_SERVICES); do \
+		docker push $(GCP_REGISTRY)/$$svc:$(TAG); \
+	done
+
+gcp-build-push: gcp-build-images gcp-push-images ## Build and push all GCP demo images
+
+gcp-restart-demo: ## Re-run startup script on the demo VM
+	gcloud compute instances reset $(GCP_NAME)-demo --zone $(GCP_ZONE) --project $(GCP_PROJECT)
+
+gcp-deploy-all: gcp-build-push gcp-deploy-infra ## Build images, push, and provision GCP demo
+
+gcp-outputs: ## Show GCP demo URLs
+	@terraform -chdir=$(GCP_TF_DIR) output
