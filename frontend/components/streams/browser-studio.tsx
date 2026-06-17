@@ -56,6 +56,27 @@ function stateTone(state: WHIPSessionState): "default" | "success" | "warning" {
   }
 }
 
+function mediaErrorMessage(err: unknown): string {
+  if (!(err instanceof DOMException)) {
+    return "Could not access your camera or microphone.";
+  }
+
+  switch (err.name) {
+    case "NotAllowedError":
+      return "Camera/mic permission was denied. Click the lock icon in the address bar and allow camera and microphone for this site.";
+    case "NotFoundError":
+      return "No camera or microphone was found on this device.";
+    case "NotReadableError":
+      return "Your camera or microphone is already in use by another app.";
+    case "OverconstrainedError":
+      return "The selected camera settings are not supported. Try a different device.";
+    case "SecurityError":
+      return "Camera and microphone require a secure connection. Use https:// for this site.";
+    default:
+      return `Could not access your camera or microphone (${err.name}).`;
+  }
+}
+
 export function BrowserStudio({ stream, session }: BrowserStudioProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const whipRef = useRef<WHIPSession | null>(null);
@@ -72,6 +93,7 @@ export function BrowserStudio({ stream, session }: BrowserStudioProps) {
   const [micEnabled, setMicEnabled] = useState(true);
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [previewRequested, setPreviewRequested] = useState(false);
   const [publishState, setPublishState] = useState<WHIPSessionState>("idle");
   const [stats, setStats] = useState<{ bitrate: number; frameRate: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -122,6 +144,12 @@ export function BrowserStudio({ stream, session }: BrowserStudioProps) {
 
   const startPreview = useCallback(async () => {
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setPermissionGranted(false);
+        setPermissionError("This browser does not support camera or microphone access.");
+        return;
+      }
+
       if (typeof window !== "undefined" && !window.isSecureContext) {
         setPermissionGranted(false);
         setPermissionError(
@@ -135,20 +163,30 @@ export function BrowserStudio({ stream, session }: BrowserStudioProps) {
       }
 
       const videoConstraints: MediaTrackConstraints = {
-        width: { min: 1280, ideal: 1280 },
-        height: { min: 720, ideal: 720 },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
         frameRate: { ideal: 30 },
       };
       if (selectedCamera) {
-        videoConstraints.deviceId = { exact: selectedCamera };
+        videoConstraints.deviceId = { ideal: selectedCamera };
       }
 
       const constraints: MediaStreamConstraints = {
         video: videoConstraints,
-        audio: selectedMic ? { deviceId: { exact: selectedMic } } : true,
+        audio: selectedMic ? { deviceId: { ideal: selectedMic } } : true,
       };
 
-      const ms = await navigator.mediaDevices.getUserMedia(constraints);
+      let ms: MediaStream;
+      try {
+        ms = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "OverconstrainedError") {
+          ms = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        } else {
+          throw err;
+        }
+      }
+
       mediaStreamRef.current = ms;
 
       if (videoRef.current) {
@@ -160,17 +198,19 @@ export function BrowserStudio({ stream, session }: BrowserStudioProps) {
       await enumerateDevices();
     } catch (err) {
       setPermissionGranted(false);
-      if (err instanceof DOMException && err.name === "NotAllowedError") {
-        setPermissionError("Camera/mic permission was denied. Please allow access in your browser settings.");
-      } else {
-        setPermissionError("Could not access your camera or microphone.");
-      }
+      setPermissionError(mediaErrorMessage(err));
     }
   }, [selectedCamera, selectedMic, enumerateDevices]);
 
   useEffect(() => {
+    if (!previewRequested || !permissionGranted) {
+      return;
+    }
     startPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCamera, selectedMic]);
 
+  useEffect(() => {
     return () => {
       const wasLive =
         publishStateRef.current === "live" ||
@@ -189,16 +229,13 @@ export function BrowserStudio({ stream, session }: BrowserStudioProps) {
         endStream(sessionRef.current, streamIdRef.current).catch(() => {});
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!permissionGranted) {
-      return;
-    }
-    startPreview();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCamera, selectedMic]);
+  async function enablePreview() {
+    setPreviewRequested(true);
+    setPermissionError(null);
+    await startPreview();
+  }
 
   useEffect(() => {
     function handleBeforeUnload(e: BeforeUnloadEvent) {
@@ -345,10 +382,19 @@ export function BrowserStudio({ stream, session }: BrowserStudioProps) {
             ) : null}
           </div>
 
+          {!permissionGranted && !permissionError ? (
+            <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
+              Allow camera and microphone to preview your stream before going live.
+              <Button className="mt-2" onClick={enablePreview}>
+                Enable camera and microphone
+              </Button>
+            </div>
+          ) : null}
+
           {permissionError ? (
             <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
               {permissionError}
-              <Button className="mt-2" onClick={startPreview}>
+              <Button className="mt-2" onClick={enablePreview}>
                 Try again
               </Button>
             </div>
