@@ -369,11 +369,13 @@ function EncoderStudio({
   onBack: () => void;
 }) {
   const [copiedField, setCopiedField] = useState<"server" | "key" | null>(null);
-  const [ingestStatus, setIngestStatus] = useState<Stream["status"]>(stream.status);
+  const [ingestStatus, setIngestStatus] = useState(stream.status);
+  const [trackedStream, setTrackedStream] = useState(stream);
 
-  useEffect(() => {
+  if (stream.id !== trackedStream.id || stream.status !== trackedStream.status) {
+    setTrackedStream(stream);
     setIngestStatus(stream.status);
-  }, [stream.id, stream.status]);
+  }
 
   useEffect(() => {
     const id = window.setInterval(() => {

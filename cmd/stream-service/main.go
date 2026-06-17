@@ -133,24 +133,80 @@ func main() {
 		}
 	})))
 
-mux.Handle("/streams/", auth.Middleware(app.Config.JWTSecret, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/streams/end/") || strings.HasPrefix(r.URL.Path, "/streams/delete/") {
-		http.NotFound(w, r)
-		return
-	}
+	mux.Handle("/streams/", auth.Middleware(app.Config.JWTSecret, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/streams/end/") || strings.HasPrefix(r.URL.Path, "/streams/delete/") {
+			http.NotFound(w, r)
+			return
+		}
 
-	user, ok := auth.UserFromContext(r.Context())
-	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, httpx.ErrorResponse{Error: auth.ErrUnauthorized.Error()})
-		return
-	}
+		user, ok := auth.UserFromContext(r.Context())
+		if !ok {
+			httpx.WriteJSON(w, http.StatusUnauthorized, httpx.ErrorResponse{Error: auth.ErrUnauthorized.Error()})
+			return
+		}
 
-	relativePath := strings.TrimPrefix(r.URL.Path, "/streams/")
-	if strings.HasSuffix(relativePath, "/assets") {
-		streamID := strings.TrimSuffix(relativePath, "/assets")
-		item, err := service.Get(r.Context(), streamID)
+		relativePath := strings.TrimPrefix(r.URL.Path, "/streams/")
+		if strings.HasSuffix(relativePath, "/assets") {
+			streamID := strings.TrimSuffix(relativePath, "/assets")
+			item, err := service.Get(r.Context(), streamID)
+			if err != nil {
+				httpx.WriteJSON(w, http.StatusNotFound, httpx.ErrorResponse{Error: err.Error()})
+				return
+			}
+
+			if item.OwnerID != user.ID && user.Role != "admin" && user.Role != "moderator" {
+				httpx.WriteJSON(w, http.StatusForbidden, httpx.ErrorResponse{Error: "stream not owned by user"})
+				return
+			}
+
+			switch r.Method {
+			case http.MethodGet:
+				assets, err := service.ListAssets(r.Context(), streamID)
+				if err != nil {
+					httpx.WriteJSON(w, http.StatusInternalServerError, httpx.ErrorResponse{Error: err.Error()})
+					return
+				}
+
+				httpx.WriteJSON(w, http.StatusOK, map[string]any{"assets": assets})
+			case http.MethodPost:
+				var req createAssetUploadRequest
+				if err := httpx.ReadJSON(r, &req); err != nil {
+					httpx.WriteJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Error: err.Error()})
+					return
+				}
+
+				objectKey := fmt.Sprintf("streams/%s/assets/%d-%s", streamID, time.Now().Unix(), sanitizeFileName(req.FileName))
+				asset := stream.NewAsset(streamID, item.OwnerID, req.AssetKind, objectKey, req.ContentType)
+				if err := service.RegisterAsset(r.Context(), asset); err != nil {
+					httpx.WriteJSON(w, http.StatusInternalServerError, httpx.ErrorResponse{Error: err.Error()})
+					return
+				}
+
+				target, err := presigner.PresignPutObject(r.Context(), objectKey, req.ContentType)
+				if err != nil {
+					httpx.WriteJSON(w, http.StatusInternalServerError, httpx.ErrorResponse{Error: err.Error()})
+					return
+				}
+
+				httpx.WriteJSON(w, http.StatusCreated, map[string]any{
+					"asset":         asset,
+					"upload_target": target,
+				})
+			default:
+				http.NotFound(w, r)
+			}
+
+			return
+		}
+
+		item, err := service.Get(r.Context(), relativePath)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusNotFound, httpx.ErrorResponse{Error: err.Error()})
+			status := http.StatusInternalServerError
+			if errors.Is(err, stream.ErrNotFound) {
+				status = http.StatusNotFound
+			}
+
+			httpx.WriteJSON(w, status, httpx.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -159,69 +215,13 @@ mux.Handle("/streams/", auth.Middleware(app.Config.JWTSecret, http.HandlerFunc(f
 			return
 		}
 
-		switch r.Method {
-		case http.MethodGet:
-			assets, err := service.ListAssets(r.Context(), streamID)
-			if err != nil {
-				httpx.WriteJSON(w, http.StatusInternalServerError, httpx.ErrorResponse{Error: err.Error()})
-				return
-			}
-
-			httpx.WriteJSON(w, http.StatusOK, map[string]any{"assets": assets})
-		case http.MethodPost:
-			var req createAssetUploadRequest
-			if err := httpx.ReadJSON(r, &req); err != nil {
-				httpx.WriteJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Error: err.Error()})
-				return
-			}
-
-			objectKey := fmt.Sprintf("streams/%s/assets/%d-%s", streamID, time.Now().Unix(), sanitizeFileName(req.FileName))
-			asset := stream.NewAsset(streamID, item.OwnerID, req.AssetKind, objectKey, req.ContentType)
-			if err := service.RegisterAsset(r.Context(), asset); err != nil {
-				httpx.WriteJSON(w, http.StatusInternalServerError, httpx.ErrorResponse{Error: err.Error()})
-				return
-			}
-
-			target, err := presigner.PresignPutObject(r.Context(), objectKey, req.ContentType)
-			if err != nil {
-				httpx.WriteJSON(w, http.StatusInternalServerError, httpx.ErrorResponse{Error: err.Error()})
-				return
-			}
-
-			httpx.WriteJSON(w, http.StatusCreated, map[string]any{
-				"asset":         asset,
-				"upload_target": target,
-			})
-		default:
+		if r.Method != http.MethodGet {
 			http.NotFound(w, r)
+			return
 		}
 
-		return
-	}
-
-	item, err := service.Get(r.Context(), relativePath)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, stream.ErrNotFound) {
-			status = http.StatusNotFound
-		}
-
-		httpx.WriteJSON(w, status, httpx.ErrorResponse{Error: err.Error()})
-		return
-	}
-
-	if item.OwnerID != user.ID && user.Role != "admin" && user.Role != "moderator" {
-		httpx.WriteJSON(w, http.StatusForbidden, httpx.ErrorResponse{Error: "stream not owned by user"})
-		return
-	}
-
-	if r.Method != http.MethodGet {
-		http.NotFound(w, r)
-		return
-	}
-
-	httpx.WriteJSON(w, http.StatusOK, item)
-})))
+		httpx.WriteJSON(w, http.StatusOK, item)
+	})))
 
 	mux.HandleFunc("POST /streams/live", func(w http.ResponseWriter, r *http.Request) {
 		streamKey := r.URL.Query().Get("stream_key")

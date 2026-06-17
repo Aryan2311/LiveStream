@@ -44,7 +44,7 @@ resource "google_compute_instance" "demo" {
     enable-oslogin = "TRUE"
   }
 
-  metadata_startup_script = templatefile("${path.module}/startup.sh.tpl", {
+  metadata_startup_script = replace(templatefile("${path.module}/startup.sh.tpl", {
     project_id             = var.project_id
     region                 = var.region
     image_repository       = var.image_repository
@@ -57,7 +57,7 @@ resource "google_compute_instance" "demo" {
     ingest_signing_key     = var.ingest_signing_key
     postgres_password      = var.postgres_password
     static_ip              = google_compute_address.demo.address
-  })
+  }), "\r\n", "\n")
 
   allow_stopping_for_update = true
 }

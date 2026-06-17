@@ -26,7 +26,10 @@ function resolvePlaybackSrc(playbackUrl: string): string {
 export function StreamPlayer({ playbackUrl, streamKey }: StreamPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const playerRef = useRef<WHEPPlayer | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const resolvedKey = streamKey || extractStreamKey(playbackUrl);
+  const [error, setError] = useState<string | null>(
+    resolvedKey ? null : "Unable to determine stream key for playback.",
+  );
   const [state, setState] = useState<WHEPPlayerState>("idle");
   const [fallbackNote, setFallbackNote] = useState<string | null>(null);
 
@@ -34,28 +37,22 @@ export function StreamPlayer({ playbackUrl, streamKey }: StreamPlayerProps) {
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return undefined;
+    if (!video || !resolvedKey) return undefined;
 
-    const key = streamKey || extractStreamKey(playbackUrl);
-    if (!key) {
-      setError("Unable to determine stream key for playback.");
-      return undefined;
-    }
-
-    const whepUrl = `${window.location.origin}/whep/live/${key}/whep`;
+    const whepUrl = `${window.location.origin}/whep/live/${resolvedKey}/whep`;
     const hlsSrc = resolvePlaybackSrc(playbackUrl);
 
     let cancelled = false;
     let switchedToHls = false;
     let whepPlayer: WHEPPlayer | null = null;
     let hlsCleanup: (() => void) | null = null;
-    let whepTimeout: number | undefined;
+    const timeout = { id: undefined as number | undefined };
 
     const tryHls = () => {
       if (cancelled || switchedToHls) return;
       switchedToHls = true;
-      if (whepTimeout !== undefined) {
-        window.clearTimeout(whepTimeout);
+      if (timeout.id !== undefined) {
+        window.clearTimeout(timeout.id);
       }
 
       setFallbackNote(
@@ -104,10 +101,8 @@ export function StreamPlayer({ playbackUrl, streamKey }: StreamPlayerProps) {
     whepPlayer = new WHEPPlayer({
       onStateChange: (s) => {
         onStateChange(s);
-        if (s === "playing") {
-          if (whepTimeout !== undefined) {
-            window.clearTimeout(whepTimeout);
-          }
+        if (s === "playing" && timeout.id !== undefined) {
+          window.clearTimeout(timeout.id);
         }
         if (s === "failed") {
           tryHls();
@@ -116,7 +111,7 @@ export function StreamPlayer({ playbackUrl, streamKey }: StreamPlayerProps) {
     });
     playerRef.current = whepPlayer;
 
-    whepTimeout = window.setTimeout(() => {
+    timeout.id = window.setTimeout(() => {
       if (cancelled || switchedToHls) return;
       if (whepPlayer && whepPlayer.getState() !== "playing") {
         tryHls();
@@ -129,14 +124,14 @@ export function StreamPlayer({ playbackUrl, streamKey }: StreamPlayerProps) {
 
     return () => {
       cancelled = true;
-      if (whepTimeout !== undefined) {
-        window.clearTimeout(whepTimeout);
+      if (timeout.id !== undefined) {
+        window.clearTimeout(timeout.id);
       }
       whepPlayer?.stop();
       hlsCleanup?.();
       playerRef.current = null;
     };
-  }, [playbackUrl, streamKey, onStateChange]);
+  }, [playbackUrl, resolvedKey, onStateChange]);
 
   return (
     <div className="space-y-3">

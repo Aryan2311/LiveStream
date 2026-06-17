@@ -26,11 +26,11 @@ func NewClient(baseURL string) *Client {
 }
 
 type pathListEntry struct {
-	Name    string          `json:"name"`
-	Source  json.RawMessage `json:"source"`
-	Online  bool            `json:"online"`
-	Ready   bool            `json:"ready"`
-	Available bool          `json:"available"`
+	Name      string          `json:"name"`
+	Source    json.RawMessage `json:"source"`
+	Online    bool            `json:"online"`
+	Ready     bool            `json:"ready"`
+	Available bool            `json:"available"`
 }
 
 type pathListResponse struct {

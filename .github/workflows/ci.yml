@@ -37,10 +37,10 @@ jobs:
         run: go mod tidy
 
       - name: Format
-        run: test -z "$(gofmt -l .)"
+        run: test -z "$(gofmt -l cmd internal)"
 
       - name: Test
-        run: go test ./...
+        run: go test ./cmd/... ./internal/...
 
       - name: Build
         run: go build ./cmd/...

@@ -21,4 +21,5 @@ node_modules/
 frontend/.next/
 web/dist/
 deploy/docker/data/
+deploy/docker/generated/certs/
 observability/data/

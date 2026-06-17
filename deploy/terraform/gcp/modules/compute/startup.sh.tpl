@@ -53,7 +53,7 @@ AWS_SECRET_ACCESS_KEY=minio123
 MEDIA_BUCKET_NAME=live-demo-media-artifacts
 S3_ENDPOINT=http://minio:9000
 S3_USE_PATH_STYLE=true
-ASSET_PUBLIC_BASE_URL=http://${static_ip}/assets
+ASSET_PUBLIC_BASE_URL=https://${static_ip}/assets
 UPLOAD_URL_EXPIRY=15m
 AUTH_SERVICE_URL=http://auth-service:8081
 STREAM_SERVICE_URL=http://stream-service:8082
@@ -62,10 +62,10 @@ FRONTEND_URL=http://frontend:3000
 API_PROXY_TARGET=http://api:8080
 NEXT_PUBLIC_API_BASE_URL=
 OTEL_EXPORTER_OTLP_ENDPOINT=
-PUBLIC_BASE_URL=http://${static_ip}
+PUBLIC_BASE_URL=https://${static_ip}
 RTMP_BASE_URL=rtmp://${static_ip}:1935
 HLS_BASE_URL=http://mediamtx:8888/live
-WHIP_BASE_URL=http://${static_ip}/whip
+WHIP_BASE_URL=https://${static_ip}/whip
 STREAM_APP_NAME=live
 STREAM_PUBLISH_TTL=24h
 MEDIA_WEBHOOK_HEADER_NAME=X-Internal-Service-Token
@@ -120,6 +120,13 @@ paths:
   "~^live/.+$":
     source: publisher
 EOF
+
+mkdir -p deploy/docker/generated/certs
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout deploy/docker/generated/certs/privkey.pem \
+  -out deploy/docker/generated/certs/fullchain.pem \
+  -subj "/CN=${static_ip}" \
+  -addext "subjectAltName=IP:${static_ip}"
 
 export IMAGE_REGISTRY="${image_repository}"
 export IMAGE_TAG="${image_tag}"

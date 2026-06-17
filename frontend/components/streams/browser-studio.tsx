@@ -122,6 +122,14 @@ export function BrowserStudio({ stream, session }: BrowserStudioProps) {
 
   const startPreview = useCallback(async () => {
     try {
+      if (typeof window !== "undefined" && !window.isSecureContext) {
+        setPermissionGranted(false);
+        setPermissionError(
+          "Camera and microphone require HTTPS. Open this site with https:// or use OBS with the RTMP URL from the encoder tab.",
+        );
+        return;
+      }
+
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach((t) => t.stop());
       }
