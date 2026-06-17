@@ -11,6 +11,7 @@ dist/
 tfplan
 *.tfvars
 !*.tfvars.example
+deploy/terraform/gcp/environments/demo/cloudflare-origin*.pem
 coverage.out
 tmp/
 vendor/

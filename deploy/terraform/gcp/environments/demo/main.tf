@@ -49,6 +49,12 @@ resource "random_password" "postgres_password" {
   special = false
 }
 
+locals {
+  origin_cert_b64 = var.cloudflare_origin_cert_file != "" ? base64encode(file(var.cloudflare_origin_cert_file)) : ""
+  origin_key_b64  = var.cloudflare_origin_key_file != "" ? base64encode(file(var.cloudflare_origin_key_file)) : ""
+  public_host     = trimspace(var.custom_domain) != "" ? trimspace(var.custom_domain) : module.compute.external_ip
+}
+
 module "network" {
   source              = "../../modules/network"
   name                = var.name
@@ -81,6 +87,9 @@ module "compute" {
   playback_signing_key   = random_password.playback_signing_key.result
   ingest_signing_key     = random_password.ingest_signing_key.result
   postgres_password      = random_password.postgres_password.result
+  custom_domain          = trimspace(var.custom_domain)
+  origin_cert_b64        = local.origin_cert_b64
+  origin_key_b64         = local.origin_key_b64
 
   depends_on = [module.artifact_registry]
 }

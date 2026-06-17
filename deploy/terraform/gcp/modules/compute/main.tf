@@ -57,6 +57,9 @@ resource "google_compute_instance" "demo" {
     ingest_signing_key     = var.ingest_signing_key
     postgres_password      = var.postgres_password
     static_ip              = google_compute_address.demo.address
+    custom_domain          = var.custom_domain
+    origin_cert_b64        = var.origin_cert_b64
+    origin_key_b64         = var.origin_key_b64
   }), "\r\n", "\n")
 
   allow_stopping_for_update = true

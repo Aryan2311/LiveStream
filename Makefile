@@ -146,3 +146,7 @@ gcp-deploy-all: gcp-build-push gcp-deploy-infra ## Build images, push, and provi
 
 gcp-outputs: ## Show GCP demo URLs
 	@terraform -chdir=$(GCP_TF_DIR) output
+
+gcp-apply-domain: ## Apply Cloudflare domain on live VM (DOMAIN=... CERT=... KEY=...)
+	@test -n "$(DOMAIN)" || (echo "Set DOMAIN, CERT, and KEY, e.g. make gcp-apply-domain DOMAIN=live.example.com CERT=deploy/terraform/gcp/environments/demo/cloudflare-origin.pem KEY=deploy/terraform/gcp/environments/demo/cloudflare-origin-key.pem" && exit 1)
+	powershell -File scripts/gcp-apply-domain.ps1 -Domain "$(DOMAIN)" -CertFile "$(CERT)" -KeyFile "$(KEY)"

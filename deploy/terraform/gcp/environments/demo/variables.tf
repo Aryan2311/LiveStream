@@ -49,3 +49,21 @@ variable "ssh_source_ranges" {
   description = "Restrict SSH access for the demo VM."
   default     = ["0.0.0.0/0"]
 }
+
+variable "custom_domain" {
+  type        = string
+  default     = ""
+  description = "Public hostname served through Cloudflare (e.g. live.example.com)."
+}
+
+variable "cloudflare_origin_cert_file" {
+  type        = string
+  default     = ""
+  description = "Path to Cloudflare origin certificate PEM. Required for Full (strict) SSL."
+}
+
+variable "cloudflare_origin_key_file" {
+  type        = string
+  default     = ""
+  description = "Path to Cloudflare origin private key PEM."
+}

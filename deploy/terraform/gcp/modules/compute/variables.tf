@@ -66,3 +66,23 @@ variable "postgres_password" {
   type      = string
   sensitive = true
 }
+
+variable "custom_domain" {
+  type        = string
+  default     = ""
+  description = "Public hostname for HTTPS (e.g. live.example.com). Leave empty to use the VM IP."
+}
+
+variable "origin_cert_b64" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Base64-encoded Cloudflare origin certificate PEM."
+}
+
+variable "origin_key_b64" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Base64-encoded Cloudflare origin private key PEM."
+}

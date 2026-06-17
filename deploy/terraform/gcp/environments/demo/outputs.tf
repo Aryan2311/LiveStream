@@ -5,11 +5,16 @@ output "external_ip" {
 
 output "app_url" {
   description = "Open this URL to use the platform."
-  value       = "http://${module.compute.external_ip}"
+  value       = "https://${local.public_host}"
+}
+
+output "custom_domain" {
+  description = "Configured custom domain, if any."
+  value       = trimspace(var.custom_domain)
 }
 
 output "rtmp_ingest_url" {
-  description = "RTMP ingest base URL for OBS."
+  description = "RTMP ingest base URL for OBS (use VM IP; Cloudflare proxy does not support RTMP)."
   value       = "rtmp://${module.compute.external_ip}:1935/live"
 }
 
