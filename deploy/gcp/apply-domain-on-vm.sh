@@ -28,7 +28,7 @@ PUBLIC_URL="https://$DOMAIN"
 if [ -f .env.gcp ]; then
   sed -i "s|^ASSET_PUBLIC_BASE_URL=.*|ASSET_PUBLIC_BASE_URL=$PUBLIC_URL/assets|" .env.gcp
   sed -i "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=$PUBLIC_URL|" .env.gcp
-  sed -i "s|^WHIP_BASE_URL=.*|WHIP_BASE_URL=$PUBLIC_URL/whip|" .env.gcp
+  sed -i "s|^WHIP_BASE_URL=.*|WHIP_BASE_URL=http://mediamtx:8889|" .env.gcp
 fi
 
 mkdir -p deploy/docker/generated/certs
